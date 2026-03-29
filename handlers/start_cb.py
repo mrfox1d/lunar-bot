@@ -1,3 +1,4 @@
+import os
 from handlers.databases import Database
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, FSInputFile, InputMediaPhoto
@@ -13,14 +14,21 @@ async def start_cb(callback: CallbackQuery):
     # --- получаем юзера ---
     user = await db.get_user(user_id)
 
-    # --- скачиваем аватар ---
-    file = await callback.bot.get_file(callback.message.from_user.photo[-1].file_id)
+    # --- скачиваем аватар (ИСПРАВЛЕНО) ---
     avatar_path = f"materials/avatar_{user_id}.jpg"
-    await callback.bot.download_file(file.file_path, avatar_path)
+    photos = await callback.bot.get_user_profile_photos(user_id, limit=1)
+    
+    if photos.total_count > 0:
+        file_id = photos.photos[0][-1].file_id
+        file = await callback.bot.get_file(file_id)
+        await callback.bot.download_file(file.file_path, avatar_path)
+        avatar = Image.open(avatar_path).resize((383, 383)).convert("RGBA")
+    else:
+        # Если авы нет, делаем серый квадрат-заглушку
+        avatar = Image.new("RGBA", (383, 383), (80, 80, 80, 255))
 
     # --- база ---
     base = Image.open("materials/lunar-profile.jpg").convert("RGBA")
-    avatar = Image.open(avatar_path).resize((383, 383)).convert("RGBA")
 
     # --- скругление ---
     mask = Image.new("L", (383, 383), 0)
@@ -45,7 +53,7 @@ async def start_cb(callback: CallbackQuery):
         width = bbox[2] - bbox[0]
         draw.text((center_x - width / 2, y), text, font=font, fill=fill)
 
-    # --- имя ---
+    # --- имя (ИСПРАВЛЕНА МАТЕМАТИКА КООРДИНАТ Y) ---
     full_name = callback.message.from_user.full_name[:18]
     username = f"@{callback.message.from_user.username}"[:22] if callback.message.from_user.username else ""
     user_id_text = f"ID: {user_id}"
@@ -56,12 +64,15 @@ async def start_cb(callback: CallbackQuery):
 
     draw.text((start_x, start_y), full_name, font=medium, fill="#FFFFFF")
 
-    name_h = draw.textbbox((start_x, start_y), full_name, font=medium)[3]
-    current_y = name_h + spacing
+    # Берем нижнюю границу имени (bbox[3]) и прибавляем отступ для следующей строки
+    name_bbox = draw.textbbox((start_x, start_y), full_name, font=medium)
+    current_y = name_bbox[3] + spacing
 
     if username:
         draw.text((start_x, current_y), username, font=regular, fill="#FFFFFF")
-        current_y += draw.textbbox((start_x, current_y), username, font=regular)[3] + spacing
+        # Снова обновляем Y для ID
+        user_bbox = draw.textbbox((start_x, current_y), username, font=regular)
+        current_y = user_bbox[3] + spacing
 
     draw.text((start_x, current_y), user_id_text, font=regular_35, fill="#888888")
 
@@ -103,5 +114,10 @@ async def start_cb(callback: CallbackQuery):
 
     # --- редактируем сообщение ---
     media = InputMediaPhoto(media=FSInputFile(result_path))
-
     await callback.message.edit_media(media=media, reply_markup=markup)
+
+    # --- удаляем временные файлы ---
+    if os.path.exists(avatar_path):
+        os.remove(avatar_path)
+    if os.path.exists(result_path):
+        os.remove(result_path)
