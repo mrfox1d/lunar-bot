@@ -14,8 +14,8 @@ dp = Dispatcher()
 db = Database()
 
 async def main():
-    print("▶️ Bot is running...")
     await db.init_db()
+    print("▶️ Bot is running...")
     dp.include_routers(*get_all_routers("handlers"))
     await dp.start_polling(bot)
 
